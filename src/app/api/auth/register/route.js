@@ -1,28 +1,54 @@
 import { NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-
-let users = []; // in-memory
+import { users, nextId } from '@/lib/store';
+import { hashPassword, signToken } from '@/lib/auth';
 
 export async function POST(req) {
-  const { name, email, password } = await req.json();
-  if (!name || !email || !password) {
-    return NextResponse.json({ message: 'Incomplete data' }, { status: 400 });
+  try {
+    const { name, email, password } = await req.json();
+
+    if (!name || !email || !password) {
+      return NextResponse.json(
+        { message: 'name, email, and password are required' },
+        { status: 400 }
+      );
+    }
+
+    if (!process.env.JWT_SECRET) {
+      return NextResponse.json(
+        { message: 'Server misconfigured: JWT_SECRET is missing' },
+        { status: 500 }
+      );
+    }
+
+    const exists = users.find(u => u.email === email);
+    if (exists) {
+      return NextResponse.json(
+        { message: 'Email already registered' },
+        { status: 409 }
+      );
+    }
+
+    const passwordHash = await hashPassword(password); // pakai helper
+    const user = {
+      id: nextId(),
+      name,
+      email,
+      passwordHash,
+      createdAt: new Date().toISOString(),
+    };
+    users.push(user);
+
+    const token = signToken({ userId: user.id, email: user.email, name: user.name }); // pakai helper
+
+    return NextResponse.json(
+      {
+        message: 'Registered',
+        user: { id: user.id, name: user.name, email: user.email },
+        token,
+      },
+      { status: 201 }
+    );
+  } catch {
+    return NextResponse.json({ message: 'Invalid JSON' }, { status: 400 });
   }
-
-  if (users.find(u => u.email === email)) {
-    return NextResponse.json({ message: 'Email already exists' }, { status: 409 });
-  }
-
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = { id: Date.now().toString(), name, email, passwordHash };
-  users.push(user);
-
-  const token = jwt.sign(
-    { userId: user.id, email: user.email },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN }
-  );
-
-  return NextResponse.json({ message: 'Registered', user: { id: user.id, name, email }, token });
 }

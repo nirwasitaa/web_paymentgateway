@@ -1,36 +1,42 @@
-// src/app/api/items/route.js
 import { NextResponse } from 'next/server';
-import { items, nextId } from '@/lib/store';
-import { getAuthUserFromRequest } from '@/lib/auth';
-
-export async function GET() {
-  // Public list
-  return NextResponse.json({ data: items });
-}
+import { users } from '@/lib/store';
+import { comparePassword, signToken } from '@/lib/auth';
 
 export async function POST(req) {
-  const me = getAuthUserFromRequest(req);
-  if (!me) {
-    return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-  }
-
   try {
-    const { name, description } = await req.json();
-    if (!name) {
-      return NextResponse.json({ message: 'name is required' }, { status: 400 });
+    const { email, password } = await req.json();
+
+    if (!email || !password) {
+      return NextResponse.json(
+        { message: 'email and password are required' },
+        { status: 400 }
+      );
     }
 
-    const now = new Date().toISOString();
-    const item = {
-      id: nextId(),
-      name,
-      description: description || '',
-      ownerId: me.userId,
-      createdAt: now,
-      updatedAt: now
-    };
-    items.push(item);
-    return NextResponse.json({ message: 'Created', item }, { status: 201 });
+    if (!process.env.JWT_SECRET) {
+      return NextResponse.json(
+        { message: 'Server misconfigured: JWT_SECRET is missing' },
+        { status: 500 }
+      );
+    }
+
+    const user = users.find(u => u.email === email);
+    if (!user) {
+      return NextResponse.json({ message: 'Invalid credentials' }, { status: 401 });
+    }
+
+    const ok = await comparePassword(password, user.passwordHash);
+    if (!ok) {
+      return NextResponse.json({ message: 'Invalid credentials' }, { status: 401 });
+    }
+
+    const token = signToken({ userId: user.id, email: user.email, name: user.name });
+
+    return NextResponse.json({
+      message: 'Logged in',
+      user: { id: user.id, name: user.name, email: user.email },
+      token
+    });
   } catch {
     return NextResponse.json({ message: 'Invalid JSON' }, { status: 400 });
   }
